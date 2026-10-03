@@ -1,0 +1,27 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Cookie body -->
+    <path
+        android:fillColor="#C68A3C"
+        android:pathData="M54,54m-34,0a34,34 0,1 1,68 0a34,34 0,1 1,-68 0" />
+    <!-- Choco chips -->
+    <path
+        android:fillColor="#6B4226"
+        android:pathData="M42,44m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path
+        android:fillColor="#6B4226"
+        android:pathData="M64,58m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+    <path
+        android:fillColor="#6B4226"
+        android:pathData="M48,66m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path
+        android:fillColor="#6B4226"
+        android:pathData="M62,40m-4.5,0a4.5,4.5 0,1 1,9 0a4.5,4.5 0,1 1,-9 0" />
+    <!-- Check mark -->
+    <path
+        android:fillColor="#388E3C"
+        android:pathData="M44,78l8,8 16,-18 -4,-4 -12,13 -4,-4z" />
+</vector>
