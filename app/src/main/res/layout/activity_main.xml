@@ -1,32 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:orientation="vertical">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
 
     <EditText
-        android:id="@+id/etAccounts"
+        android:id="@+id/etPaste"
         android:layout_width="match_parent"
-        android:layout_height="160dp"
+        android:layout_height="140dp"
+        android:layout_margin="12dp"
         android:gravity="top|start"
         android:hint="Paste accounts here (one per line):&#10;email|password|refresh_token|client_id"
         android:inputType="textMultiLine"
-        android:minLines="5"
+        android:minLines="4"
         android:scrollbars="vertical" />
 
     <Button
-        android:id="@+id/btnLoad"
+        android:id="@+id/btnSave"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:text="Save Session" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
         android:layout_marginTop="12dp"
-        android:text="Load Accounts" />
+        android:text="Sessions"
+        android:textSize="16sp"
+        android:textStyle="bold" />
 
     <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvAccounts"
+        android:id="@+id/rvSessions"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="4dp"
         android:layout_weight="1" />
 
 </LinearLayout>
