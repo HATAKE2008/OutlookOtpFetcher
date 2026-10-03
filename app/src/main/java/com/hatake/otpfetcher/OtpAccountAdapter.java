@@ -89,6 +89,15 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
         return accounts.size();
     }
 
+    // Microsoft identity endpoints + mail APIs.
+    // Graph needs a token with Graph Mail scopes; legacy live.com tokens only
+    // work against the Outlook REST API — so we try both (fixes Graph HTTP 401).
+    private static final String SCOPE_GRAPH = "https://graph.microsoft.com/Mail.Read offline_access";
+    private static final String TOKEN_V2 = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+    private static final String TOKEN_LIVE = "https://login.live.com/oauth20_token.srf";
+    private static final String GRAPH_URL = "https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=1&$select=subject,bodyPreview";
+    private static final String OUTLOOK_URL = "https://outlook.office.com/api/v2.0/me/messages?$top=1&$select=Subject,BodyPreview";
+
     private void fetchOtp(Context ctx, OtpAccount account, OtpViewHolder holder) {
         final Context appCtx = ctx.getApplicationContext();
         final int adapterPos = holder.getBindingAdapterPosition();
@@ -96,52 +105,43 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
         executor.execute(() -> {
             try {
                 // 1) Exchange refresh_token for access_token.
-                RequestBody tokenBody = new FormBody.Builder()
-                        .add("client_id", account.getClientId())
-                        .add("grant_type", "refresh_token")
-                        .add("refresh_token", account.getRefreshToken())
-                        .build();
-
-                Request tokenRequest = new Request.Builder()
-                        .url("https://login.live.com/oauth20_token.srf")
-                        .post(tokenBody)
-                        .build();
-
-                String accessToken;
-                try (Response tokenResp = httpClient.newCall(tokenRequest).execute()) {
-                    if (!tokenResp.isSuccessful() || tokenResp.body() == null) {
-                        throw new Exception("Token HTTP " + tokenResp.code());
+                // Try modern consumers endpoint (with Graph Mail scope) first,
+                // fall back to legacy live.com endpoint.
+                String accessToken = null;
+                Exception tokenErr = null;
+                try {
+                    accessToken = refreshAccessToken(TOKEN_V2, account, true);
+                } catch (Exception e) {
+                    tokenErr = e;
+                }
+                if (accessToken == null) {
+                    try {
+                        accessToken = refreshAccessToken(TOKEN_LIVE, account, false);
+                    } catch (Exception e) {
+                        tokenErr = e;
                     }
-                    String tokenJson = tokenResp.body().string();
-                    JSONObject obj = new JSONObject(tokenJson);
-                    if (!obj.has("access_token")) {
-                        throw new Exception("No access_token: " + tokenJson);
-                    }
-                    accessToken = obj.getString("access_token");
+                }
+                if (accessToken == null) {
+                    throw new Exception("Token refresh failed: "
+                            + (tokenErr != null ? tokenErr.getMessage() : "unknown"));
                 }
 
-                // 2) Fetch latest inbox message subject + preview.
-                Request msgRequest = new Request.Builder()
-                        .url("https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=1&$select=subject,bodyPreview")
-                        .addHeader("Authorization", "Bearer " + accessToken)
-                        .get()
-                        .build();
-
-                String haystack;
-                try (Response msgResp = httpClient.newCall(msgRequest).execute()) {
-                    if (!msgResp.isSuccessful() || msgResp.body() == null) {
-                        throw new Exception("Graph HTTP " + msgResp.code());
+                // 2) Fetch latest inbox message. Graph first, Outlook REST fallback
+                // (live.com tokens are rejected by Graph with 401).
+                String haystack = null;
+                Exception graphErr = null;
+                try {
+                    haystack = fetchGraph(accessToken);
+                } catch (Exception e) {
+                    graphErr = e;
+                }
+                if (haystack == null) {
+                    try {
+                        haystack = fetchOutlookRest(accessToken);
+                    } catch (Exception e) {
+                        throw new Exception("Mail fetch failed (" + graphErr.getMessage()
+                                + " / " + e.getMessage() + ")");
                     }
-                    String msgJson = msgResp.body().string();
-                    JSONObject root = new JSONObject(msgJson);
-                    JSONArray values = root.optJSONArray("value");
-                    if (values == null || values.length() == 0) {
-                        throw new Exception("Inbox empty");
-                    }
-                    JSONObject latest = values.getJSONObject(0);
-                    String subject = latest.optString("subject", "");
-                    String preview = latest.optString("bodyPreview", "");
-                    haystack = subject + "\n" + preview;
                 }
 
                 // 3) Extract 5-8 digit OTP.
@@ -176,6 +176,87 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
                 });
             }
         });
+    }
+
+    private String refreshAccessToken(String url, OtpAccount account, boolean withScope)
+            throws Exception {
+        FormBody.Builder builder = new FormBody.Builder()
+                .add("client_id", account.getClientId())
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", account.getRefreshToken());
+        if (withScope) {
+            builder.add("scope", SCOPE_GRAPH);
+        }
+        RequestBody tokenBody = builder.build();
+        Request tokenRequest = new Request.Builder()
+                .url(url)
+                .post(tokenBody)
+                .build();
+        try (Response tokenResp = httpClient.newCall(tokenRequest).execute()) {
+            String tokenJson = tokenResp.body() != null ? tokenResp.body().string() : "";
+            if (!tokenResp.isSuccessful()) {
+                throw new Exception("Token HTTP " + tokenResp.code() + ": " + trunc(tokenJson));
+            }
+            JSONObject obj = new JSONObject(tokenJson);
+            if (!obj.has("access_token")) {
+                throw new Exception("No access_token: " + trunc(tokenJson));
+            }
+            return obj.getString("access_token");
+        }
+    }
+
+    private String fetchGraph(String accessToken) throws Exception {
+        Request msgRequest = new Request.Builder()
+                .url(GRAPH_URL)
+                .addHeader("Authorization", "Bearer " + accessToken)
+                .get()
+                .build();
+        try (Response msgResp = httpClient.newCall(msgRequest).execute()) {
+            String msgJson = msgResp.body() != null ? msgResp.body().string() : "";
+            if (!msgResp.isSuccessful()) {
+                throw new Exception("Graph HTTP " + msgResp.code() + " " + trunc(msgJson));
+            }
+            JSONObject root = new JSONObject(msgJson);
+            JSONArray values = root.optJSONArray("value");
+            if (values == null || values.length() == 0) {
+                throw new Exception("Inbox empty");
+            }
+            JSONObject latest = values.getJSONObject(0);
+            String subject = latest.optString("subject", "");
+            String preview = latest.optString("bodyPreview", "");
+            return subject + "\n" + preview;
+        }
+    }
+
+    private String fetchOutlookRest(String accessToken) throws Exception {
+        Request msgRequest = new Request.Builder()
+                .url(OUTLOOK_URL)
+                .addHeader("Authorization", "Bearer " + accessToken)
+                .get()
+                .build();
+        try (Response msgResp = httpClient.newCall(msgRequest).execute()) {
+            String msgJson = msgResp.body() != null ? msgResp.body().string() : "";
+            if (!msgResp.isSuccessful()) {
+                throw new Exception("Outlook HTTP " + msgResp.code() + " " + trunc(msgJson));
+            }
+            JSONObject root = new JSONObject(msgJson);
+            JSONArray values = root.optJSONArray("value");
+            if (values == null || values.length() == 0) {
+                throw new Exception("Inbox empty");
+            }
+            JSONObject latest = values.getJSONObject(0);
+            String subject = latest.optString("Subject", "");
+            String preview = latest.optString("BodyPreview", "");
+            return subject + "\n" + preview;
+        }
+    }
+
+    private static String trunc(String s) {
+        if (s == null) {
+            return "";
+        }
+        s = s.trim();
+        return s.length() > 160 ? s.substring(0, 160) + "..." : s;
     }
 
     private void copyToClipboard(Context ctx, String text) {
