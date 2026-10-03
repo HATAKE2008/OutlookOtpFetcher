@@ -80,7 +80,7 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
             account.setStatus("Loading...");
             holder.tvStatus.setText("Loading...");
             holder.btnFetch.setEnabled(false);
-            fetchOtp(ctx, account, holder);
+            fetchOtpFromMicrosoft(ctx, account, holder);
         });
     }
 
@@ -89,16 +89,17 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
         return accounts.size();
     }
 
-    // Microsoft identity endpoints + mail APIs.
-    // Graph needs a token with Graph Mail scopes; legacy live.com tokens only
-    // work against the Outlook REST API — so we try both (fixes Graph HTTP 401).
-    private static final String SCOPE_GRAPH = "https://graph.microsoft.com/Mail.Read offline_access";
+    // Microsoft identity endpoints + mail APIs (exact fallback chain):
+    // 1. Token primary: consumers v2.0 endpoint with scope "offline_access Mail.Read".
+    // 2. Token fallback: legacy login.live.com endpoint (no scope).
+    // 3. Mail primary: Microsoft Graph; 4. Mail fallback: Outlook REST API.
+    private static final String SCOPE = "offline_access Mail.Read";
     private static final String TOKEN_V2 = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
     private static final String TOKEN_LIVE = "https://login.live.com/oauth20_token.srf";
     private static final String GRAPH_URL = "https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=1&$select=subject,bodyPreview";
-    private static final String OUTLOOK_URL = "https://outlook.office.com/api/v2.0/me/messages?$top=1&$select=Subject,BodyPreview";
+    private static final String OUTLOOK_URL = "https://outlook.office.com/api/v2.0/me/mailfolders/inbox/messages?$top=1&$select=Subject,BodyPreview";
 
-    private void fetchOtp(Context ctx, OtpAccount account, OtpViewHolder holder) {
+    private void fetchOtpFromMicrosoft(Context ctx, OtpAccount account, OtpViewHolder holder) {
         final Context appCtx = ctx.getApplicationContext();
         final int adapterPos = holder.getBindingAdapterPosition();
 
@@ -185,7 +186,7 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
                 .add("grant_type", "refresh_token")
                 .add("refresh_token", account.getRefreshToken());
         if (withScope) {
-            builder.add("scope", SCOPE_GRAPH);
+            builder.add("scope", SCOPE);
         }
         RequestBody tokenBody = builder.build();
         Request tokenRequest = new Request.Builder()
@@ -195,11 +196,11 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
         try (Response tokenResp = httpClient.newCall(tokenRequest).execute()) {
             String tokenJson = tokenResp.body() != null ? tokenResp.body().string() : "";
             if (!tokenResp.isSuccessful()) {
-                throw new Exception("Token HTTP " + tokenResp.code() + ": " + trunc(tokenJson));
+                throw new Exception("Token HTTP " + tokenResp.code() + ": " + tokenJson);
             }
             JSONObject obj = new JSONObject(tokenJson);
             if (!obj.has("access_token")) {
-                throw new Exception("No access_token: " + trunc(tokenJson));
+                throw new Exception("No access_token: " + tokenJson);
             }
             return obj.getString("access_token");
         }
@@ -214,7 +215,7 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
         try (Response msgResp = httpClient.newCall(msgRequest).execute()) {
             String msgJson = msgResp.body() != null ? msgResp.body().string() : "";
             if (!msgResp.isSuccessful()) {
-                throw new Exception("Graph HTTP " + msgResp.code() + " " + trunc(msgJson));
+                throw new Exception("Graph HTTP " + msgResp.code() + " " + msgJson);
             }
             JSONObject root = new JSONObject(msgJson);
             JSONArray values = root.optJSONArray("value");
@@ -237,7 +238,7 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
         try (Response msgResp = httpClient.newCall(msgRequest).execute()) {
             String msgJson = msgResp.body() != null ? msgResp.body().string() : "";
             if (!msgResp.isSuccessful()) {
-                throw new Exception("Outlook HTTP " + msgResp.code() + " " + trunc(msgJson));
+                throw new Exception("Outlook HTTP " + msgResp.code() + " " + msgJson);
             }
             JSONObject root = new JSONObject(msgJson);
             JSONArray values = root.optJSONArray("value");
@@ -249,14 +250,6 @@ public class OtpAccountAdapter extends RecyclerView.Adapter<OtpAccountAdapter.Ot
             String preview = latest.optString("BodyPreview", "");
             return subject + "\n" + preview;
         }
-    }
-
-    private static String trunc(String s) {
-        if (s == null) {
-            return "";
-        }
-        s = s.trim();
-        return s.length() > 160 ? s.substring(0, 160) + "..." : s;
     }
 
     private void copyToClipboard(Context ctx, String text) {
