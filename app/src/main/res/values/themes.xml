@@ -1,5 +1,10 @@
 <resources>
-    <style name="Theme.OutlookOtpFetcher" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
+    <!-- Pure dark theme: black background, dark surface, white text -->
+    <style name="Theme.OutlookOtpFetcher" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/surface</item>
+        <item name="colorAccent">@color/purple_500</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:navigationBarColor">@color/background</item>
     </style>
 </resources>
